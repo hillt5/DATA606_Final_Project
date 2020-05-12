@@ -1,5 +1,5 @@
 ---
-title: "DATA 606 Data Project Proposal"
+title: "DATA 606 Data Project: Worldwide Alcohol Use"
 author: "Thomas Hill"
 output: pdf_document
 ---
@@ -7,13 +7,34 @@ output: pdf_document
 ### Data Preparation
 
 ```{r setup, echo=TRUE, results='hide', warning=FALSE, message=FALSE}
+library(stringr)
+library(dplyr)
+library(lubridate)
+
 # load data from the fivethirtyeight github
 etoh_consumption <- read.csv('https://raw.githubusercontent.com/fivethirtyeight/data/master/alcohol-consumption/drinks.csv')
 
+etoh_use_disorders <- read.csv('https://raw.githubusercontent.com/hillt5/DATA606_Final_Project/master/Prevalence%20of%20alcohol%20use%20disorders.csv')
+
 head(etoh_consumption)
 names(etoh_consumption)
+```
+
+
+I also looked at the prevalence of alcohol use disorders (AUD's) in 2016. The UN defines an AUD, or problem drinking, as meeting the criteria set forth in the Diagnostic and Statistical Manual (DSM). This includes the admissions of frequent cravinngs, withdrawals and patterns of drinking more than is acceptable for social or health reasons.  It also asks about the consequences of drinking - interfering with work, school, and social interactions.
+
+```{r etoh-use-disorders}
+
+names(etoh_use_disorders) <- c('country', 'year', 'both', 'male', 'female')
+etoh_use_disorders <- etoh_use_disorders[-1,]
+etoh_use_disorders$male <- as.numeric(word(etoh_use_disorders$male, 1))
+etoh_use_disorders$female <- as.numeric(word(etoh_use_disorders$male, 1))
+etoh_use_disorders$both <- as.numeric(word(etoh_use_disorders$male, 1))
+head(etoh_use_disorders)
 
 ```
+
+Data for alcohol use disorders is the 12-month prevalence in people older than the age of 15 in the country as a percent. The percent is given as for both genders, as well as separately for each gender (with the denominator being the total amont of women for AUD% in females for example.)
 
 ### Research question 
 
@@ -38,7 +59,7 @@ These data were collected by the World Health Organization as part of its Global
 
 **What type of study is this (observational/experiment)?**
 
-This study is observational as it aims to estimate the real consumption of alcohol in 2010. There is no randomization or treatment arm, the metrics are derived but taken as representative of the actual alcohol consumption. 
+This study is observational as it aims to estimate the real consumption of alcohol in 2010. There is no randomization or treatment arm, the metrics are derived but taken as representative of the actual alcohol consumption. This data is usually collected by a division of the UN or national sources.  
 
 ### Data Source 
 
@@ -70,6 +91,7 @@ hist(etoh_consumption$total_litres_of_pure_alcohol)
 ```
   The total alcohol consumption per country is skewed to the right, likely because there are many countries where effective alcohol consumption is zero for religious reasons.  This is likely an underestimator of alcohol consumption in this country as alcohol per the GISAH methodology is based off governement and commercial resources, and alcohol has a long history of personal production.
   
+  
 ```{r alcohol-type}
 
 hist(etoh_consumption$beer_servings, xlim = c(0, 400), ylim = c(0,140))
@@ -77,6 +99,107 @@ hist(etoh_consumption$wine_servings, xlim = c(0, 400), ylim = c(0,140))
 hist(etoh_consumption$spirit_servings, xlim = c(0, 400), ylim = c(0,140))
 ```
 
-By serving, wine appears to be the most exclusive alcohol type. Beer and spirits seem to have small differences in consumption. For a final analysis, I'd like to see if there are any countries with majority- or plurality consumption trends, and in this case, if this could be used to predict total alcohol consumption.
+By serving, wine appears to be the most exclusive alcohol type. Beer and spirits seem to have small differences in consumption. 
 
-Finally, for the last section I'll expresss the alcohol servings as a percent of total alcohol consumption. Since there are only the three sources of alcohol considered, I'll avoid any conversions from servings --> liters of pure alcohol by expressing the servings as a percent. 
+# Correlation of Alcohol Type to Total Consumption
+
+```{r multiple-regression-etoh-consumption}
+
+consumption_by_type <- lm(total_litres_of_pure_alcohol ~ beer_servings + spirit_servings + wine_servings, data = etoh_consumption) #all three variables
+summary(consumption_by_type)
+
+consumption_by_type_wo_beer <- lm(total_litres_of_pure_alcohol ~ spirit_servings + wine_servings, data = etoh_consumption)
+summary(consumption_by_type_wo_beer) #omit beer
+
+
+consumption_by_type_wo_wine <- lm(total_litres_of_pure_alcohol ~ spirit_servings + beer_servings, data = etoh_consumption)
+summary(consumption_by_type_wo_wine) #omit wine
+
+consumption_by_type_wo_spirits <- lm(total_litres_of_pure_alcohol ~ wine_servings + beer_servings, data = etoh_consumption)
+summary(consumption_by_type_wo_wine) #omit spirits
+
+
+
+```
+
+After running a multivariate regression, the three variables are all similarly correlated to predicting overall alcohol consumption. As a second option, I omitted one variable from three different multivariate regressions to see if omitting a random variable improved the correlation coefficient. This did not improve the strength of the prediction as measured by adjusted R-squared. Next, I'll take a look at the residuals to find any reasons to question the underlying assumptions.
+
+
+```{r consumption-by-type-residuals}
+
+plot(consumption_by_type$residuals ~ etoh_consumption$total_litres_of_pure_alcohol)
+
+hist(consumption_by_type$residuals)
+
+qqnorm(consumption_by_type$residuals)
+qqline(consumption_by_type$residuals)
+
+```
+Based on the various plots for residuals, the residuals are not random with respect to the dependent variable, and the residual histogram is very skewed to the right.  This multivariate model does not hold up to the necessary underlying assumptions.
+5
+# Single variable correlation - total alcohol consumption versus alcohol use disorders
+
+As a final digression, I'll be looking at the diagnosis of alcohol use disorders as a dependent variable versus total alcohol consumption. The assumption of my own that I'm testing is that the higher the alcohol consmumption in a country, the more likely it is to interfere with the fabric of society. 
+
+```{r addition-of-AUD-to-original-dataset}
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+
+consumption_vs_disorder <- etoh_consumption %>% 
+  inner_join(etoh_use_disorders) 
+
+consumption_vs_disorder$both <- replace_na(consumption_vs_disorder$both, replace = 0)
+
+#I felt justified in replacing NA's with '0' as the two countries in question, Monaco and Saudi Arabia, have negligible alcohol consumption according to official statistics. It is likely that this reflects the reality of the situation as well.
+
+
+sum(is.na(consumption_vs_disorder$both))
+
+consumption_vs_disorder <- consumption_vs_disorder %>%
+  mutate(highest_type = case_when(beer_servings > spirit_servings & beer_servings > wine_servings ~ "beer",
+                                  spirit_servings > beer_servings & spirit_servings > wine_servings ~ "spirit",
+                                  wine_servings > beer_servings & wine_servings > spirit_servings ~ "wine",
+                                  TRUE ~ "none"))
+
+
+consumption_vs_disorder_lm <- lm(both ~ total_litres_of_pure_alcohol, data = consumption_vs_disorder)
+summary(consumption_vs_disorder_lm)
+
+ggplot(consumption_vs_disorder, aes(x = total_litres_of_pure_alcohol, y = both, color = highest_type)) +
+         geom_point() +
+  labs(title = "Annual alcohol consumption versus prevalence of alcohol use disorders", x = "Annual per capital alcohol consumption, in liters of pure alcohol", y = "Percent prevalence of alcohol use disorders for ages > 15", color = "Most common type of alcohol consumed")
+
+
+
+```
+
+Increased alcohol use is mildly correlated with alcohol use disorders, with an R-squared value of approximately 0.43.  I interpret the slope as meaning that on average, every additional liter of pure alcohol consumpmtion per capita is associated with an increase in 1% prevalence of alcohol use disorders in the population. Per the original fivethrityeight article, this is a little over 30 standard drinks - whether it is a can of beer, a glass of wine or shot of spirit. 
+
+I also attached a scatterplot that colored by the most popular seving of alcohol - beer, wine, spirits, or none for negligible consumption - and it appearsthat there exist some outliers with heavy drinking, which are preferential drinkers of beer and spirits.  
+
+Below is the residual analysis of this linear regression from the previous section.
+
+
+```{r consumption-vs-disorder-residuals}
+
+plot(consumption_vs_disorder_lm$residuals ~ consumption_vs_disorder$total_litres_of_pure_alcohol, color = consumption_vs_disorder$highest_type)
+       
+hist(consumption_vs_disorder_lm$residuals, breaks = 12)
+
+qqnorm(consumption_vs_disorder_lm$residuals)
+qqline(consumption_vs_disorder_lm$residuals)
+
+
+```
+
+Based on the histogram of residuals, I would say the residuals are normally distributed and the residual plot has no major patterns. There are some outlying countries with high positive residuals, which means that the predicted values underestimate when compared to the observed values. Since these outliers exist on the higher side of the total litres, it's possible that these countries lack a public health framework which would naturally seek to minimize the negative health impacts on increased alcohol use.
+
+
+# Conclusions
+
+My multivariate analysis of the type of alcohol favored in a given country and its impact on overall consumption did not meet the underlying assumptions for the residuals. Even after looking at variables to investigate collinearity, this did not improve the original model. Instead, I performed an additional analysis looking at alcohol consumption versus alcohol use disorders, and a linear relationship can be found between these two variables. When filtering for different alcohol type preferences, it's easier to visualize that most countries prefer beer, countries who prefer wine tend to drink middling amounts - neither low or high - and that spirits and beer represent the maximum values of consumption as well as alcohol use disorders. This model did meet the assumptions to accept the correlation between total consumption and disorders as valid. It is also worth mentioning that there are a handful of countries with low or no recorded alcohol consumption that may impact the model negatively.
+
+# Limitations and Further Research
+
+In the future, it would be interesting to look at the patterns in drinking relative to gender, as well as looking at alcohol trends over time - specifically timed to economic downturns or major changes in alcohol and health regulations.  It is also plausible to express alcohol not as total servings, but rather relative cost to consumer as a funciton of purchasing-power-parity, which the UN has records to support. On the one hand, this would indicate what percent of a household's income is being spent on alcohol, but would also confound the cost with governmental efforts to discourage alcohol overuse by taxation.  Finally, identifying cultural norms that decrease overall alcohol consumption could help to separate countries where consumption is close to zero.
